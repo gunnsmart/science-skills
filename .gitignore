@@ -1,0 +1,7 @@
+# Local outputs from the standalone image generator notebook.
+/image_generator_outputs/
+.ipynb_checkpoints/
+__pycache__/
+
+# Agent scratch files / lightweight test dependencies.
+/.arena/
