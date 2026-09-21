@@ -179,10 +179,13 @@ class NotebookTest(NotebookCase):
                 self.assertEqual(settings["pipeline"], preset["pipeline"])
                 self.assertEqual(settings["steps"], preset["steps"])
 
-    def test_dropdown_matches_registry(self):
-        line = next(line for line in CELLS["settings"].splitlines() if line.startswith("MODEL ="))
-        options = json.loads(line.split("#@param ")[1])
-        self.assertEqual(set(options), {*self.ns["MODEL_REGISTRY"], "Custom"})
+    def test_default_settings_exclude_runtime_and_secrets(self):
+        defaults = self.ns["DEFAULT_SETTINGS"]
+        self.assertIn(defaults["MODEL"], self.ns["MODEL_REGISTRY"])
+        self.assertEqual(set(defaults), set(self.ns["SETTING_FIELDS"]))
+        self.assertNotIn("HF_TOKEN", defaults)
+        self.assertNotIn("PIPE", defaults)
+        self.assertTrue(all(isinstance(value, (str, int, float, bool)) for value in defaults.values()))
 
     def test_custom_repo_and_local_directory(self):
         for source in ("owner/new-model", "/content/local-diffusers"):
