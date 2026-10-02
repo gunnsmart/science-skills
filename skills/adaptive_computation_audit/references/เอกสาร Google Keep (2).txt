@@ -1,0 +1,3154 @@
+﻿## Executive conclusion
+
+
+**The central missing quantity is not “completion,” state movement, or difficulty. It is the conditional value of additional computation.**
+
+
+For an information set $\mathcal F_l$ available at stage , the relevant question is:
+
+
+$$
+\text{How much expected task loss can continuing reduce, relative to its cost?}
+$$
+
+
+Most of the reported failures arise from substituting something easier to measure—confidence, residual size, a bounded resistance signal, or a soft halting distribution—for that quantity.
+
+
+However, **there is no general solution satisfying all the stated requirements exactly**. Three obstacles must be separated:
+
+
+1. **Semantic incompatibility:** a weighted mixture of intermediate states is generally not the same computation as deterministic first-crossing inference.
+2. **Non-identifiability:** local, label-free state geometry cannot universally determine whether additional computation will improve task performance.
+3. **Unavoidable preferences:** choosing an accuracy–compute tradeoff requires a budget, risk tolerance, or utility specification. Normalization cannot eliminate that choice.
+
+
+These are structural issues, not evidence that adaptive computation itself is futile.
+
+
+### Evidence qualification
+
+
+I treat the supplied numerical results as **reported experimental observations**, not independently verified measurements. Without sample counts, uncertainty estimates, metric definitions, and matched controls, they support diagnoses and testable hypotheses—not universal conclusions.
+
+
+The historical failure table also needs qualification:
+- ACT explicitly proposed deterministic, differentiable adaptive computation; particular instability observations are not an impossibility result for the method. [arxiv](https://arxiv.org/abs/1603.08983)
+- Universal Transformers reported benefits from dynamic halting on several structured tasks, with a marginal degradation on machine translation. That is more nuanced than “depth is unrelated to difficulty.” [arxiv](https://arxiv.org/html/1807.03819v3)
+- PonderNet reported positive adaptive-computation results and evaluated parity experiments across ten seeds. Its existence does not establish universal robustness, but neither does a blanket “hyperparameter-sensitive failure” characterization. [arxiv](https://ar5iv.labs.arxiv.org/html/2107.05407)
+- Mixture-of-Depths uses a predictable total budget with context-dependent token allocation. That is a constrained allocation solution, not static computation everywhere; it reported post-training sampling steps upwards of 50% faster in its evaluated setting. [arxiv](https://arxiv.org/abs/2404.02258)
+
+
+The correct comparison is therefore between **different optimization problems and execution semantics**, not between methods presumed to have failed at one common problem.
+
+
+---
+
+
+## Mathematical preliminaries: repair the setup first
+
+
+### 1. The stopping mass is incomplete unless the last stage absorbs survival
+
+
+Your definitions imply
+
+
+$$
+\sum_{l=1}^{N}a_l=1-r_{N+1}.
+$$
+
+
+Consequently, unless , the proposed output is not a normalized mixture. Changing the gate also changes the overall scale of the output.
+
+
+A finite-horizon convention is:
+
+
+$$
+q_N=1,
+\qquad
+a_N=r_N.
+$$
+
+
+All formulas below use this convention. Hard inference also needs a forced exit at .
+
+
+Then the expected depth under the hazard distribution is
+
+
+$$
+\mathbb E[T]
+=
+\sum_{l=1}^{N}l\,a_l
+=
+\sum_{l=1}^{N}r_l.
+$$
+
+
+### 2. A hazard threshold is not a distributional exit rule
+
+
+ is a conditional hazard. It is not the cumulative probability of having stopped:
+
+
+$$
+P(T\le l)=1-r_{l+1}.
+$$
+
+
+Thus, thresholding  and thresholding  define different stopping rules. Neither generally reproduces the weighted-state output.
+
+
+### 3. Distinguish three objectives
+
+
+Writing $p_l=\operatorname{readout}(h_l)$:
+
+
+$$
+\underbrace{\ell\!\left(\operatorname{readout}\!\left(\sum_l a_lh_l\right),y\right)}
+_{\text{loss of a state mixture}}
+\ne
+\underbrace{\sum_l a_l\ell(p_l,y)}
+_{\text{expected exit loss}}
+\ne
+\underbrace{\ell(p_{H_\tau},y)}
+_{\text{deterministic first-crossing loss}}.
+$$
+
+
+These inequalities are central. They cannot be repaired merely by tuning temperature.
+
+
+---
+
+
+## 1. The halting problem: learn continuation value, not desired depth
+
+
+### Formal statement
+
+
+Let  be the incremental cost of executing the next stage, and let $\mathcal F_l$ contain the information visible to the controller.
+
+
+Define conditional stopping risk
+
+
+$$
+R_l
+=
+\mathbb E[\ell(p_l,Y)\mid\mathcal F_l].
+$$
+
+
+For a specified compute price , the finite-horizon optimal-stopping recursion is
+
+
+$$
+V_N=R_N,
+$$
+
+
+$$
+V_l
+=
+\min\left\{
+R_l,\;
+\lambda c_{l+1}
++
+\mathbb E[V_{l+1}\mid\mathcal F_l]
+\right\}.
+$$
+
+
+Define the **advantage of continuing**
+
+
+$$
+A_l
+=
+R_l-
+\left(
+\lambda c_{l+1}
++
+\mathbb E[V_{l+1}\mid\mathcal F_l]
+\right).
+$$
+
+
+The optimal decision is:
+
+
+$$
+\text{continue iff }A_l>0.
+$$
+
+
+**This is the correct decision signal.** It requires no externally supplied depth labels. But estimating it reliably requires information about task outcomes and future computation.
+
+
+### Why prior objectives can fail mechanically
+
+
+**First, a mixture loss can reward states that are useful only in combination.**
+
+
+Training may make  and  jointly predictive without making either a good individual exit. A gate optimized through that mixture need not learn stopping value.
+
+
+**Second, survival weighting creates gradient starvation.**
+
+
+For the enumerated objective
+
+
+$$
+J=\mathbb E\left[
+\sum_l a_l\ell_l+
+\lambda\sum_l r_lc_l
+\right],
+$$
+
+
+holding the trajectory fixed, differentiation with respect to a nonterminal gate logit  gives
+
+
+$$
+\frac{\partial J}{\partial z_l}
+=
+\mathbb E\left[
+r_lq_l(1-q_l)
+\left(
+\ell_l-J^{\mathrm{cont}}_{l+1}
+\right)
+\right],
+$$
+
+
+where  is the conditional future loss plus future compute cost under the current downstream stopping policy.
+
+
+The desired comparison is present, but multiplied by:
+- : little survival means little training signal.
+- : a saturated gate is difficult to reverse.
+
+
+Deep stages can therefore remain bad because they are rarely trained, while the controller exits early because those stages are bad.
+
+
+**Third, compute penalties only make sense relative to execution.**
+
+
+A correctly survival-weighted penalty charges stages that would execute. An ungated penalty may charge nonexistent work or have no useful derivative with respect to stopping.
+
+
+### What the supplied numbers establish
+
+
+| Observation | Supported interpretation | Not established |
+|---|---|---|
+| Removing cost: accuracy remains 1.000, correlation falls from 0.771 to 0.103 | Task accuracy alone does not identify the desired allocation | Positive difficulty correlation is necessary for useful adaptation |
+| Removing gated cost: accuracy falls to 0.695 | This objective change strongly damages the reported system | Gating is universally necessary in that exact form |
+| Removing stage supervision: correlation becomes 0.124, accuracy 0.992 | Intermediate predictive competence matters in this setting | External depth labels are necessary |
+| Correlations change sign across  | The reported allocation is not robust across these configurations | Increasing  should theoretically increase correlation monotonically |
+
+
+Intermediate losses $\ell(p_l,y)$ use **task labels**, not depth labels. They are compatible with the stated prohibition on depth supervision.
+
+
+Also, allocating more compute to “harder” samples is not always optimal: some hard samples are irreducibly ambiguous, while moderately hard samples are highly improvable.
+
+
+### Solvability conditions
+
+
+A practical solution needs:
+1. **Predictable continuation advantage:** available features must contain information about .
+2. **Competent candidate exits:** deeper and shallower predictions must receive enough training.
+3. **A specified utility:** a compute budget or acceptable excess risk must be given.
+4. **Compatible execution semantics:** the training objective must evaluate the policy actually deployed.
+
+
+To replace an arbitrary penalty coefficient with an interpretable specification, use
+
+
+$$
+\min_\theta \mathbb E[\ell(p_H,Y)]
+\quad
+\text{subject to}
+\quad
+\mathbb E[C_H]\le B.
+$$
+
+
+A dual variable can adapt to meet . This removes manual selection of the *tradeoff multiplier*, not all optimizer settings or the need to choose .
+
+
+For scaling, use actual cost
+
+
+$$
+C_l=\sum_{j=1}^{l}c_j,
+$$
+
+
+not depth index alone. If the budget is a fraction of full computation, normalize by . If it is an absolute latency budget, do not.
+
+
+### Minimal falsifiable test
+
+
+Across :
+- Fix the task distribution, utility specification, and controller-selection rule.
+- Train without depth labels or depth-specific retuning.
+- On held-out data, execute full trajectories to estimate whether continuation was beneficial.
+- Measure decision regret, task risk, and actual compute.
+
+
+The hypothesis is falsified if the predicted sign of  fails to outperform a constant stopping decision, or if matched-budget performance does not transfer across .
+
+
+**Primary metric:** regret against a matched-information stopping oracle—not Pearson correlation with difficulty.
+
+
+---
+
+
+## 2. Target-free completion: possible as a conditional guarantee, not a universal invariant
+
+
+### Formal statement
+
+
+A useful completion variable should answer something like
+
+
+$$
+P\left(
+\text{additional computation improves loss by more than }\epsilon
+\mid\mathcal F_l
+\right)
+\le\delta.
+$$
+
+
+This is stronger and more decision-relevant than asking whether the state has stabilized.
+
+
+An alternative uses expected improvement under an admissible continuation policy :
+
+
+$$
+G_l^\pi
+=
+\mathbb E[
+\ell(p_l,Y)-\ell(p_{T^\pi},Y)
+\mid\mathcal F_l
+].
+$$
+
+
+Completion is then relative to a policy class, risk tolerance, and cost—not an intrinsic property of .
+
+
+### Why the proposed target-aware formula is not sufficient
+
+
+The issue is **unavailability of **, not . Labels need not be differentiated for  to be evaluated during training.
+
+
+Additional issues are:
+- $\ell_N$ need not be the minimum loss along the trajectory.
+-  can be negative if an intermediate loss exceeds the initial loss.
+- When $\ell_1\approx\ell_N$, normalization becomes dominated by .
+- A sample can improve later even after several stages of apparent stagnation.
+
+
+It measures progress relative to an endpoint. It does not prove that stopping now is optimal.
+
+
+### What the empirical numbers mean
+
+
+The reported mean compute is
+
+
+$$
+\bar C
+=
+\frac{2.53+2.60+2.90+2.50+2.53}{5}
+=
+2.612,
+$$
+
+
+or
+
+
+$$
+2.612/6=43.53\%
+$$
+
+
+of the full stage count. The reported range is approximately **41.7–48.3%**.
+
+
+Accuracy of – versus – suggests that the endpoint is not uniformly the best predictor. Possible explanations include:
+- Harmful later computation.
+- Intermediate supervision acting as regularization.
+- Differences in training objectives.
+- Selection advantages from target-aware evaluation, if labels enter the stopping decision.
+
+
+The last possibility must be explicitly excluded before calling these deployable adaptive-inference gains.
+
+
+### Solvability conditions
+
+
+There are three distinct routes.
+
+
+**A. Learn conditional expected gain using training labels.**
+
+
+$$
+\widehat G_l=f_\phi(\mathcal F_l).
+$$
+
+
+Training targets can be realized loss differences between stopping and specified continuations. At inference, the estimator uses no label.
+
+
+This is possible without depth labels. It gives statistical predictions, not universal correctness.
+
+
+**B. Use a certified numerical residual.**
+
+
+Suppose the same map  is repeatedly applied and is contractive:
+
+
+$$
+\|F(u)-F(v)\|\le\kappa\|u-v\|,
+\qquad \kappa<1.
+$$
+
+
+For its fixed point ,
+
+
+$$
+\|h_l-h^\star\|
+\le
+\frac{\|F(h_l)-h_l\|}{1-\kappa}.
+$$
+
+
+If $g=\operatorname{readout}$ is -Lipschitz, then
+
+
+$$
+\|g(h_l)-g(h^\star)\|
+\le
+\frac{L_g}{1-\kappa}\|F(h_l)-h_l\|.
+$$
+
+
+This certifies closeness to the converged prediction. It certifies task-loss closeness only with an additional loss regularity bound.
+
+
+It also requires a valid contraction constant and possibly another evaluation of .
+
+
+**C. Use task-specific verification.**
+
+
+Some tasks expose label-free checks: constraint satisfaction, feasibility residuals, consistency conditions, or independently checkable answers. Such checks can supply stronger evidence than generic confidence.
+
+
+### Strong limitation
+
+
+A tiny residual does not establish that the limiting prediction is correct.
+
+
+A system can converge perfectly to the wrong answer:
+
+
+$$
+F(h^\star)=h^\star
+\quad\not\Rightarrow\quad
+\ell(g(h^\star),y)\text{ is small}.
+$$
+
+
+Likewise, for arbitrary stage-dependent maps, identical prefix states can precede either negligible or substantial future improvement.
+
+
+### Minimal falsifiable test
+
+
+Predefine  and . Whenever the label-free estimator declares completion, continue offline and measure actual improvement.
+
+
+Test whether
+
+
+$$
+P(
+\ell(p_l,Y)-\ell(p_{T^\pi},Y)>\epsilon
+\mid \text{declared complete}
+)
+\le\delta
+$$
+
+
+holds on held-out data, including depth and distribution shifts.
+
+
+Failure of this conditional guarantee falsifies the completion claim. Correlation with difficulty does not test it.
+
+
+---
+
+
+## 3. Soft–hard mismatch: measure per-input execution and decision discrepancy
+
+
+### Formal statement
+
+
+Let
+
+
+$$
+H_\tau(x)=\min\{l:q_l(x)\ge\tau\},
+$$
+
+
+with forced exit at .
+
+
+The soft hazard distribution is
+
+
+$$
+P_s(T=l\mid x)=a_l(x),
+$$
+
+
+while deterministic inference induces
+
+
+$$
+P_h(T=l\mid x)=\mathbf 1[l=H_\tau(x)].
+$$
+
+
+These are different conditional distributions even when their aggregate statistics look similar.
+
+
+### Why aggregate KL is insufficient
+
+
+With terminal absorption,
+
+
+$$
+\sum_l a_l(x)=1.
+$$
+
+
+Therefore, a Bernoulli variable parameterized by  carries **no information about exit depth**.
+
+
+Comparing it with an exit-gate probability is not comparing the soft and hard stopping distributions.
+
+
+Even a correctly defined KL between dataset-level depth histograms would miss samplewise disagreement. For example:
+
+
+| Sample | Soft exit mass | Hard exit |
+|---|---|---|
+| A | All mass at stage 1 | Stage 10 |
+| B | All mass at stage 10 | Stage 1 |
+
+
+Both methods have the same marginal depth histogram and mean depth. Every sample disagrees.
+
+
+Thus, the reported KL of – does not establish semantic alignment.
+
+
+### Correct metric hierarchy
+
+
+**1. Per-input stopping-distribution mismatch**
+
+
+The total variation distance from the deterministic exit distribution is exactly
+
+
+$$
+D_{\mathrm{TV}}\!\left(a(x),\delta_{H_\tau(x)}\right)
+=
+1-a_{H_\tau(x)}(x).
+$$
+
+
+This asks whether the soft distribution actually concentrates on the deployed exit.
+
+
+**2. Per-input depth mismatch**
+
+
+$$
+W_1\!\left(a(x),\delta_{H_\tau(x)}\right)
+=
+\sum_l a_l(x)|l-H_\tau(x)|.
+$$
+
+
+Use cost differences instead of stage differences when stages have unequal cost.
+
+
+**3. Predictive discrepancy**
+
+
+$$
+D_{\mathrm{JS}}(p_s(x),p_h(x)),
+$$
+
+
+alongside classification disagreement or another task-appropriate output metric.
+
+
+**4. Task and compute discrepancy**
+
+
+$$
+\mathbb E[\ell(p_h,Y)-\ell(p_s,Y)],
+$$
+
+
+$$
+\mathbb E[C_{H_\tau}]
+-
+\mathbb E\left[\sum_l a_lC_l\right].
+$$
+
+
+Report tails and subgroups, not just averages.
+
+
+### What about trajectory distance?
+
+
+Under the setup as written, if the gate does not alter state updates, then before hard exit:
+
+
+$$
+h_l^{\mathrm{soft}}=h_l^{\mathrm{hard}}.
+$$
+
+
+There is no prefix-trajectory mismatch to discover. The mismatch is in **which output is returned**.
+
+
+After exit, the hard trajectory is undefined unless an explicit continuation or absorbing-state convention is introduced.
+
+
+Trajectory divergence becomes meaningful when gating changes writes, attention, communication, or subsequent state updates.
+
+
+### Gradient consistency
+
+
+For a deterministic threshold gate, the selected stage is locally constant away from threshold boundaries. Therefore, the exact gradient of the per-sample hard loss with respect to gate-only parameters is zero almost everywhere, and can be undefined at a switch.
+
+
+A soft surrogate can provide a useful gradient, but that does not make it the exact hard-execution gradient.
+
+
+### Solvability conditions
+
+
+Exact output equivalence requires special structure, such as
+
+
+$$
+\sum_l a_lh_l=h_{H_\tau},
+$$
+
+
+or at least equality after readout.
+
+
+This holds if:
+- The mass is genuinely concentrated at the hard exit.
+- All weighted states are equivalent for prediction.
+- A special cancellation or affine identity applies.
+
+
+Finite sigmoid logits do not generically produce one-hot exit distributions.
+
+
+### Minimal falsifiable test
+
+
+For every held-out input, record:
+-  and .
+- .
+- Cost-weighted .
+- Soft and hard predictions.
+- Paired task-loss difference.
+
+
+A claim of soft–hard equivalence fails if predictive or stopping discrepancies exceed a preregistered tolerance, regardless of aggregate KL.
+
+
+---
+
+
+## 4. Identity collapse: enforce useful computation, not mandatory movement
+
+
+### Formal statement
+
+
+The undesirable condition is not
+
+
+$$
+h_{l+1}\approx h_l
+$$
+
+
+by itself. It is that the system pays for stages that do not improve any relevant decision or enable later improvement.
+
+
+A natural quantity is the expected value of the stage under a specified continuation:
+
+
+$$
+U_l
+=
+\mathbb E[
+\ell(p_{\mathrm{out}}^{\mathrm{skip}\ l},Y)
+-
+\ell(p_{\mathrm{out}}^{\mathrm{execute}\ l},Y)
+].
+$$
+
+
+This is an intervention-based utility, not a norm of the residual.
+
+
+### Why the supplied evidence is suggestive but incomplete
+
+
+The reported cosine is
+
+
+$$
+\cos(h_1,h_{12})=0.9975.
+$$
+
+
+For unit-normalized states, this corresponds to
+
+
+$$
+\left\|
+\frac{h_1}{\|h_1\|}
+-
+\frac{h_{12}}{\|h_{12}\|}
+\right\|
+=
+\sqrt{2-2(0.9975)}
+\approx0.0707.
+$$
+
+
+That is small angular movement, but not zero movement. It also says nothing about norms.
+
+
+More importantly:
+- Small state changes can cross a decision boundary.
+- Large state changes can lie in a readout nullspace.
+- A strong initial representation may legitimately need almost no further computation.
+- Terminal changes of – versus mid-stage changes of – are not directly interpretable without normalization conventions and task effects.
+
+
+The $79\%/21\%/0\%$ exit distribution establishes **early-exit concentration**. It does not, alone, establish incorrect stopping.
+
+
+### Why movement penalties fail mechanically
+
+
+Consider an objective that enforces
+
+
+$$
+\|h_{l+1}-h_l\|\ge m.
+$$
+
+
+If the readout is insensitive to a subspace $\mathcal N$, then the model can choose
+
+
+$$
+h_{l+1}=h_l+v_l,
+\qquad v_l\in\mathcal N,
+$$
+
+
+and satisfy the movement requirement without changing task behavior.
+
+
+It can also oscillate between states, increasing path length without improving the answer.
+
+
+Your proposed residual scaling has an additional problem:
+
+
+$$
+h_{l+1}=h_l+\alpha_lf_l(h_l).
+$$
+
+
+If , finite  cannot create progress. If  is mostly noise, increasing  amplifies noise.
+
+
+### Solvability conditions
+
+
+Without changing stage architecture, reasonable objective-level interventions include:
+- **Training every candidate exit:** prevent useful intermediate predictors from being starved.
+- **Training counterfactual continuations:** evaluate later stages during training even when the current gate prefers to stop.
+- **Penalizing unjustified stopping:** use future loss reductions to train a continuation-value predictor.
+- **Testing stage deletion:** remove or bypass stages to determine whether apparent inactivity is truly redundant.
+
+
+These do not require depth labels.
+
+
+However, a universal guarantee that *every stage* makes meaningful task progress is impossible: some inputs are already solved, and some tasks require several individually uninformative steps before a useful result emerges.
+
+
+Even a monotonic-loss penalty,
+
+
+$$
+\max(0,\ell_{l+1}-\ell_l),
+$$
+
+
+can penalize necessary intermediate representations. It is a task-dependent inductive bias, not a general remedy.
+
+
+### Minimal falsifiable test
+
+
+For low-change stages, compare:
+1. Normal execution.
+2. Stage bypass.
+3. Forced continuation after the proposed early exit.
+
+
+Measure paired output and loss changes.
+
+
+The collapse diagnosis gains support if bypassing many stages has negligible effect **and** early stopping misses substantial later gains.
+
+
+If bypassing the stages degrades performance despite small cosine changes, the geometric diagnosis is falsified.
+
+
+---
+
+
+## 5. Asymmetric leverage: normalize evidence, but do not confuse scale with meaning
+
+
+### Formal statement
+
+
+You have
+
+
+$$
+z=z_a-z_b,
+\qquad
+z_a\in\mathbb R,
+\qquad
+z_b\in[-4,4].
+$$
+
+
+For arbitrarily large ,
+
+
+$$
+q=\sigma(z_a-z_b)\to1
+$$
+
+
+uniformly over allowed .
+
+
+Thus, the bounded branch cannot universally oppose the unbounded branch.
+
+
+That asymmetry is real.
+
+
+### Correcting the numerical diagnosis
+
+
+The reported numbers do **not** require .
+
+
+With
+
+
+$$
+z_a=3.05,\qquad z_b=1.47,
+$$
+
+
+we obtain
+
+
+$$
+q=\sigma(1.58)\approx0.829.
+$$
+
+
+That already explains the reported .
+
+
+Also,
+
+
+$$
+\sigma(3.05-4)\approx0.279
+$$
+
+
+is the minimum attainable probability at that specific  under the mathematical bound—not the expected probability under the actually learned resistance.
+
+
+The asymptotic risk is valid; the claim that the observed probability proves  exceeded four is not.
+
+
+### Why common fixes are incomplete
+
+
+| Method | What it fixes | What it does not fix |
+|---|---|---|
+| Bound both branches | Prevents unbounded amplitude imbalance | Does not calibrate competing evidence |
+| Normalize branch weights | Removes some parameter-norm leverage | Does not ensure useful features or comparable semantics |
+| Two-way softmax | Gives a normalized binary probability | Is not invariant to logit scaling |
+| Temperature | Controls sharpness | Introduces calibration and conditioning choices |
+| Residual rescaling | Changes update magnitude | Does not establish task utility |
+
+
+Moreover, because  can be negative, the purported “resistance” branch can increase the stop logit. Its semantic role is not enforced by its name.
+
+
+### A genuine scale-invariant construction
+
+
+For two linear evidence branches, cosine scores give
+
+
+$$
+s_a=
+\frac{w_a^\top u_a}{\|w_a\|\|u_a\|},
+\qquad
+s_b=
+\frac{w_b^\top u_b}{\|w_b\|\|u_b\|},
+$$
+
+
+$$
+z=\kappa(s_a-s_b).
+$$
+
+
+Then
+
+
+$$
+s_a,s_b\in[-1,1],
+\qquad
+z\in[-2\kappa,2\kappa].
+$$
+
+
+Each score is invariant to positive rescaling of its weight or feature vector.
+
+
+But:
+- Zero norms require handling.
+- An  stabilizer weakens exact invariance near zero.
+-  still controls probability sharpness.
+- Angular alignment can still make one branch dominate semantically.
+
+
+There is a useful mathematical limit here:
+
+
+> A nonconstant function cannot be both continuous at the origin and exactly invariant to all positive input scalings.
+
+
+Indeed, if  for every , continuity as  implies
+
+
+$$
+f(x)=f(0)
+$$
+
+
+for every .
+
+
+Exact scale invariance necessarily excludes the origin, introduces a singularity, or relaxes continuity.
+
+
+### Solvability conditions
+
+
+The deeper solution is to make both terms commensurate:
+
+
+$$
+\underbrace{\text{expected loss reduction}}_{\text{benefit}}
+-
+\underbrace{\lambda\times\text{additional compute}}_{\text{cost in loss units}}.
+$$
+
+
+If both branches represent calibrated risks or utilities in the same units, their competition has a defined meaning.
+
+
+Bounding unrelated latent quantities merely makes their competition numerically tidy.
+
+
+### Minimal falsifiable test
+
+
+Perform a **function-preserving reparameterization test**:
+- Multiply a branch weight by factors spanning several orders of magnitude.
+- Apply any compensating transformation needed to preserve the represented evidence.
+- Check whether decisions change.
+
+
+A claimed scale-invariant controller should preserve its decisions under the relevant transformations.
+
+
+Separately, test whether each branch predicts its stated target. Invariance without calibration does not solve stopping.
+
+
+---
+
+
+## 6. Causal evidence: label-free behavioral effects are measurable; task value is not universal
+
+
+### Formal statement
+
+
+Distinguish:
+
+
+$$
+\Delta_{\mathrm{pred}}
+=
+D\left(
+p_{\mathrm{out}}^{do(h_l=v)},
+p_{\mathrm{out}}
+\right)
+$$
+
+
+from
+
+
+$$
+\Delta_{\mathrm{task}}
+=
+\ell(p_{\mathrm{out}}^{do(h_l=v)},y)
+-
+\ell(p_{\mathrm{out}},y).
+$$
+
+
+The first measures a change in model behavior. The second measures whether the change helps or hurts the task.
+
+
+**An intervention can change the prediction substantially and improve, worsen, or preserve task performance.**
+
+
+### Why controller confidence and geometry do not establish causality
+
+
+A gate value of  establishes only what the gate predicts.
+
+
+A cosine of  establishes only a geometric relationship.
+
+
+Neither tells us:
+- Whether early computation was necessary.
+- Whether later computation changes the answer.
+- Whether the change improves expected loss.
+
+
+Likewise, weak correlation between an emission gate and a downstream intervention effect means the gate is not a reliable proxy for that chosen effect. It does not identify the reason: the effect metric, intervention, gate objective, or downstream compensation may each matter.
+
+
+### Assessment of the proposed estimators
+
+
+| Candidate | Label-free? | What it measures | Main limitation |
+|---|---|---|---|
+| Deterministic perturbation response | Yes | Finite behavioral sensitivity | Requires extra executions; interventions may be off-distribution |
+| Downstream Jacobian magnitude | Yes | Local sensitivity of outputs to state | Not the sign of task benefit; typically requires downstream computation |
+| Loss gradient | Usually needs a loss target | Local effect on that loss | Predicted labels or entropy change the target being measured |
+| Conditional mutual information | Sometimes estimable under added assumptions | Statistical dependence | Not generally a causal or task-utility measure |
+| Calibrated gain predictor | Labels during training only | Conditional expected task benefit | Depends on calibration and distribution stability |
+
+
+The proposed mutual information has a particularly important degeneracy. If the transition is deterministic,
+
+
+$$
+h_l=F_l(h_{l-1}),
+$$
+
+
+then conditioned on ,  contributes no additional randomness:
+
+
+$$
+I(h_l;h_{\mathrm{out}}\mid h_{l-1})=0
+$$
+
+
+under the standard conditional-information interpretation.
+
+
+Yet intervening on  can have a large downstream effect. Deterministic mediation is a simple example of why conditional dependence and intervention effects are different.
+
+
+### Solvability conditions
+
+
+At inference, without labels, one can measure:
+- Prediction changes under specified interventions.
+- Constraint violations.
+- Sensitivity to deterministic perturbations.
+- A learned estimate of expected task effect.
+
+
+One cannot universally measure the realized task-loss effect without knowing enough about the target or a valid substitute for it.
+
+
+There is also a compute accounting issue: executing several counterfactual continuations may cost more than simply continuing once.
+
+
+### Minimal falsifiable test
+
+
+Use a fixed, declared intervention such as bypassing one residual update. On a held-out labeled set:
+- Compute the label-free proxy.
+- Measure the actual intervention-induced loss change.
+- Test sign prediction, calibration, and whether the resulting decisions improve risk at matched total compute.
+
+
+A proxy is rejected as a stopping signal if it predicts behavioral sensitivity but not beneficial continuation.
+
+
+Labels belong in this validation experiment; they need not be available to the deployed controller.
+
+
+---
+
+
+## 7. The “three-body problem”: coupling is demonstrated; chaos is not
+
+
+### Formal statement
+
+
+Let  denote model parameters and  controller parameters. With fixed training protocol, represent training as
+
+
+$$
+(\theta_{t+1},\phi_{t+1})
+=
+F(\theta_t,\phi_t).
+$$
+
+
+Deterministic chaos concerns sensitive dependence under the **same map** , for example a positive largest Lyapunov exponent along a bounded trajectory.
+
+
+Changing noise level, loss weight, depth, or task changes  itself.
+
+
+Therefore, differing outcomes across hyperparameter sweeps do not establish chaos.
+
+
+### What the reported numbers show
+
+
+| Reported change | Observation | Defensible conclusion |
+|---|---|---|
+|  |  | Non-monotonic response in that metric |
+| ,  | Correlation  | Poor transfer of this setting |
+| Scaling  with  at  | Correlation becomes  | This rescaling improves the reported correlation |
+
+
+Without a definition of , its changes have no further theoretical interpretation.
+
+
+These observations are consistent with:
+- Nonconvexity and different basins.
+- Saturated gate gradients.
+- Changing gradient magnitudes across depth.
+- Threshold discontinuities in evaluation.
+- A compute objective whose units change with .
+- Co-adaptation between stage competence and stopping.
+
+
+None requires chaos.
+
+
+### The principal feedback loop
+
+
+A plausible loop is:
+
+
+$$
+\text{early stopping}
+\Rightarrow
+\text{weak deep-stage gradients}
+\Rightarrow
+\text{poor continuation value}
+\Rightarrow
+\text{more early stopping}.
+$$
+
+
+Another is:
+
+
+$$
+\text{strong endpoint-only supervision}
+\Rightarrow
+\text{late useful transformations}
+\Rightarrow
+\text{poor early exits}
+\Rightarrow
+\text{dependence on deep execution}.
+$$
+
+
+The objective, model, and controller jointly shape the very quantity the controller is trying to predict.
+
+
+### Solvability conditions
+
+
+An invariant exists at the level of the **decision problem**:
+
+
+$$
+\text{continue when conditional benefit exceeds conditional cost}.
+$$
+
+
+There need not be an invariant parameter value, gate temperature, or depth–difficulty correlation.
+
+
+Stability can improve through:
+- Common units for task benefit and compute.
+- Fixed budget or excess-risk specifications.
+- Sufficient training of all candidate exits.
+- Continuation targets defined against a specified policy.
+- Calibration checks separated from representation-quality checks.
+
+
+A meta-optimizer can help within a task family. It cannot provide distribution-free guarantees or remove the need to specify utility.
+
+
+Ensembling can reduce estimator variance, but:
+- Its overhead must be charged.
+- Shared systematic errors remain.
+- It does not repair soft–hard semantics.
+
+
+### Minimal falsifiable test
+
+
+To test chaos rather than generic sensitivity:
+1. Fix task data, data order, optimizer, all hyperparameters, and numerical settings.
+2. Perturb only the initial parameters by a small controlled amount.
+3. Track divergence under the same update map.
+4. Test whether a positive finite-time divergence rate persists across perturbation sizes and horizons.
+
+
+An initial transient of exponential separation alone is not sufficient evidence of a chaotic attractor.
+
+
+To test the more actionable hypothesis, freeze the backbone and train the controller against fixed continuation outcomes. If instability largely disappears, co-adaptation—not an intrinsic inability to learn stopping—is implicated.
+
+
+---
+
+
+## Cross-cutting synthesis
+
+
+### 1. Common root: not seven independent failures
+
+
+The problems fall into three interacting groups.
+
+
+| Root issue | Problems most directly affected | Missing object |
+|---|---|---|
+| Decision semantics | 1, 3, 7 | The deployed stopping policy and its actual objective |
+| Observability of useful progress | 2, 4, 6 | Conditional task benefit of future computation |
+| Optimization and calibration | 1, 4, 5, 7 | Comparable evidence and non-starved learning signals |
+
+
+The deepest common error is:
+
+
+$$
+\boxed{
+\text{A proxy for computation is treated as a certificate of useful computation.}
+}
+$$
+
+
+Confidence is not correctness. Movement is not progress. Sensitivity is not utility. Difficulty is not improvability. A normalized gate is not a calibrated decision.
+
+
+These distinctions explain much of the evidence without invoking a mysterious universal failure mode.
+
+
+### 2. Unifying principle: separate prediction, continuation value, and execution
+
+
+The most promising principle is **decision-aligned adaptive computation**:
+
+
+1. **Prediction:** each candidate exit produces a task prediction.
+2. **Valuation:** estimate the conditional improvement available through continuation.
+3. **Execution:** compare that improvement with an explicit cost or risk tolerance.
+4. **Verification:** evaluate the same execution policy that will be deployed.
+
+
+This is not necessarily a new stage architecture. Much of it is an objective and measurement discipline.
+
+
+It addresses several problems simultaneously:
+- Halting learns a decision-relevant quantity.
+- Target-free inference uses a learned conditional expectation.
+- Stage utility is evaluated in task units rather than geometric units.
+- Competing signals have commensurate meanings.
+- Scaling is expressed through actual compute cost.
+
+
+**But it does not erase the differentiable-training versus hard-threshold conflict.** One must explicitly choose among:
+- Preserving soft execution at inference.
+- Accepting a surrogate for hard execution and bounding its deployment gap.
+- Using a different deterministic, piecewise-differentiable execution construction.
+- Restricting the model class so soft and hard outputs become equivalent.
+
+
+There is no generic normalization trick that avoids this choice.
+
+
+### 3. Strongest negative results
+
+
+#### A. Generic soft mixtures cannot equal hard first-crossing execution
+
+
+Fix two distinct states  and force exit at stage two.
+
+
+The soft output is
+
+
+$$
+S(q)=qh_1+(1-q)h_2,
+$$
+
+
+while the hard output is
+
+
+$$
+H(q)=
+\begin{cases}
+h_2,&q<\tau,\\
+h_1,&q\ge\tau.
+\end{cases}
+$$
+
+
+ is continuous and generally lies between the states.  switches discontinuously.
+
+
+They cannot agree for all .
+
+
+This already disproves generic exact train–inference output equivalence for the stated setup.
+
+
+#### B. Exact hard gate gradients provide no ordinary per-sample learning signal away from boundaries
+
+
+With a fixed backbone, changing a gate-only parameter slightly does not change the selected exit unless a threshold is crossed.
+
+
+Thus the exact per-sample hard loss is piecewise constant in that parameter.
+
+
+An expected loss over a continuous input distribution can sometimes have a nonzero derivative through moving decision boundaries. But ordinary backpropagation through individual hard decisions does not automatically compute that boundary contribution.
+
+
+Therefore:
+
+
+$$
+\boxed{
+\text{Exact hard thresholding + ordinary pathwise gradients}
+\not\Rightarrow
+\text{a useful exact gate gradient}.
+}
+$$
+
+
+This is narrower and more accurate than saying all hard adaptive computation is nondifferentiable everywhere.
+
+
+#### C. No universal label-free task-progress invariant exists
+
+
+Consider two tasks with identical available states and predictions, but different conditional label distributions.
+
+
+Let the current and future predictions favor different labels. Continuing helps under one task distribution and hurts under the other.
+
+
+Any target-free rule receiving the same information makes the same decision in both worlds. It must be wrong in at least one.
+
+
+Learning a known task distribution can resolve this ambiguity statistically. A universal state-only invariant cannot.
+
+
+#### D. No universal hyperparameter-free accuracy–compute optimum exists
+
+
+Suppose continuation reduces expected loss by  and costs .
+
+
+It is optimal under the penalized objective exactly when
+
+
+$$
+g>\lambda c.
+$$
+
+
+Different users or applications can legitimately choose different . A budget or risk tolerance expresses the same preference in another form.
+
+
+No algorithm can infer a unique correct preference from the state trajectory alone.
+
+
+### 4. What single experiment could falsify the entire paradigm?
+
+
+**None.** Adaptive computation is a broad class of strategies, not one empirical hypothesis.
+
+
+There are simple task distributions where some inputs require one operation and others require many; an observable input property identifies which. Adaptation can then strictly improve expected compute at fixed accuracy.
+
+
+What can be falsified is a claim such as:
+
+
+> “This model family benefits from input-dependent stopping on this task distribution at this compute scale.”
+
+
+The strongest compact test is a **matched-budget oracle-gap experiment**.
+
+
+For full held-out trajectories, estimate:
+- : the best input-independent depth policy, including mixtures of fixed depths, at budget .
+- : the best stopping policy restricted to information actually available at inference.
+- : the learned controller.
+
+
+Then decompose
+
+
+$$
+R_{\mathrm{learned}}(B)-R_{\mathrm{fixed}}(B)
+=
+\underbrace{
+R_{\mathrm{info}}^\star(B)-R_{\mathrm{fixed}}(B)
+}_{\text{available adaptation benefit}}
++
+\underbrace{
+R_{\mathrm{learned}}(B)-R_{\mathrm{info}}^\star(B)
+}_{\text{controller regret}}.
+$$
+
+
+Interpretation:
+- No oracle advantage: little stopping opportunity exists in those trajectories under the allowed information.
+- Oracle advantage, learned controller failure: estimation or optimization is the bottleneck.
+- Advantage disappears after controller overhead: the computational benefit is not operationally useful.
+- Advantage exists only for a label-aware hindsight oracle: useful exit variation exists, but may not be observable at deployment.
+
+
+For a globally trained model-family claim, matched-budget fixed-depth models must also be trained separately. A frozen-backbone oracle test diagnoses one representation, not every possible representation.
+
+
+### 5. Five-year bet
+
+
+I would fund **calibrated continuation-value prediction, paired with task-specific certificates where available**.
+
+
+The program would have three priorities:
+
+
+| Priority | Why fund it | Main risk |
+|---|---|---|
+| Predict future task-loss improvement from current information | Directly targets the stopping decision | Miscalibration under distribution shift |
+| Develop verifiable residuals or task certificates | Can provide stronger stopping guarantees | Limited task coverage |
+| Evaluate adaptation using oracle gaps and full compute accounting | Separates representation, observability, and controller failures | Expensive evaluation |
+
+
+I would not make the primary bet on:
+- Larger collections of mutually competing gates.
+- A universal state-motion measure of completion.
+- Temperature schedules chosen from increasingly large sweeps.
+- Maximizing difficulty–depth correlation.
+- Claiming alignment from aggregate KL.
+
+
+### Final assessment
+
+
+The reported results are consistent with **misaligned objectives, weakly identifiable stopping signals, and self-reinforcing optimization failures**. They do not establish chaos, and they do not falsify adaptive computation.
+
+
+The central scientific target should be:
+
+
+$$
+\boxed{
+\text{Predictable, calibrated marginal task benefit per unit of additional compute.}
+}
+$$
+
+
+That quantity is learnable under assumptions, certifiable in restricted settings, and impossible to recover universally from label-free geometry alone.
+
+
+**Suggested next step:** run the matched-budget oracle-gap experiment before another hyperparameter sweep; it determines whether the missing ingredient is useful deeper computation, observable stopping information, or a controller capable of exploiting it.
+
+
+## Executive conclusion
+
+
+**The central missing quantity is not “completion,” state movement, or difficulty. It is the conditional value of additional computation.**
+
+
+For an information set $\mathcal F_l$ available at stage , the relevant question is:
+
+
+$$
+\text{How much expected task loss can continuing reduce, relative to its cost?}
+$$
+
+
+Most of the reported failures arise from substituting something easier to measure—confidence, residual size, a bounded resistance signal, or a soft halting distribution—for that quantity.
+
+
+However, **there is no general solution satisfying all the stated requirements exactly**. Three obstacles must be separated:
+
+
+1. **Semantic incompatibility:** a weighted mixture of intermediate states is generally not the same computation as deterministic first-crossing inference.
+2. **Non-identifiability:** local, label-free state geometry cannot universally determine whether additional computation will improve task performance.
+3. **Unavoidable preferences:** choosing an accuracy–compute tradeoff requires a budget, risk tolerance, or utility specification. Normalization cannot eliminate that choice.
+
+
+These are structural issues, not evidence that adaptive computation itself is futile.
+
+
+### Evidence qualification
+
+
+I treat the supplied numerical results as **reported experimental observations**, not independently verified measurements. Without sample counts, uncertainty estimates, metric definitions, and matched controls, they support diagnoses and testable hypotheses—not universal conclusions.
+
+
+The historical failure table also needs qualification:
+- ACT explicitly proposed deterministic, differentiable adaptive computation; particular instability observations are not an impossibility result for the method. [arxiv](https://arxiv.org/abs/1603.08983)
+- Universal Transformers reported benefits from dynamic halting on several structured tasks, with a marginal degradation on machine translation. That is more nuanced than “depth is unrelated to difficulty.” [arxiv](https://arxiv.org/html/1807.03819v3)
+- PonderNet reported positive adaptive-computation results and evaluated parity experiments across ten seeds. Its existence does not establish universal robustness, but neither does a blanket “hyperparameter-sensitive failure” characterization. [arxiv](https://ar5iv.labs.arxiv.org/html/2107.05407)
+- Mixture-of-Depths uses a predictable total budget with context-dependent token allocation. That is a constrained allocation solution, not static computation everywhere; it reported post-training sampling steps upwards of 50% faster in its evaluated setting. [arxiv](https://arxiv.org/abs/2404.02258)
+
+
+The correct comparison is therefore between **different optimization problems and execution semantics**, not between methods presumed to have failed at one common problem.
+
+
+---
+
+
+## Mathematical preliminaries: repair the setup first
+
+
+### 1. The stopping mass is incomplete unless the last stage absorbs survival
+
+
+Your definitions imply
+
+
+$$
+\sum_{l=1}^{N}a_l=1-r_{N+1}.
+$$
+
+
+Consequently, unless , the proposed output is not a normalized mixture. Changing the gate also changes the overall scale of the output.
+
+
+A finite-horizon convention is:
+
+
+$$
+q_N=1,
+\qquad
+a_N=r_N.
+$$
+
+
+All formulas below use this convention. Hard inference also needs a forced exit at .
+
+
+Then the expected depth under the hazard distribution is
+
+
+$$
+\mathbb E[T]
+=
+\sum_{l=1}^{N}l\,a_l
+=
+\sum_{l=1}^{N}r_l.
+$$
+
+
+### 2. A hazard threshold is not a distributional exit rule
+
+
+ is a conditional hazard. It is not the cumulative probability of having stopped:
+
+
+$$
+P(T\le l)=1-r_{l+1}.
+$$
+
+
+Thus, thresholding  and thresholding  define different stopping rules. Neither generally reproduces the weighted-state output.
+
+
+### 3. Distinguish three objectives
+
+
+Writing $p_l=\operatorname{readout}(h_l)$:
+
+
+$$
+\underbrace{\ell\!\left(\operatorname{readout}\!\left(\sum_l a_lh_l\right),y\right)}
+_{\text{loss of a state mixture}}
+\ne
+\underbrace{\sum_l a_l\ell(p_l,y)}
+_{\text{expected exit loss}}
+\ne
+\underbrace{\ell(p_{H_\tau},y)}
+_{\text{deterministic first-crossing loss}}.
+$$
+
+
+These inequalities are central. They cannot be repaired merely by tuning temperature.
+
+
+---
+
+
+## 1. The halting problem: learn continuation value, not desired depth
+
+
+### Formal statement
+
+
+Let  be the incremental cost of executing the next stage, and let $\mathcal F_l$ contain the information visible to the controller.
+
+
+Define conditional stopping risk
+
+
+$$
+R_l
+=
+\mathbb E[\ell(p_l,Y)\mid\mathcal F_l].
+$$
+
+
+For a specified compute price , the finite-horizon optimal-stopping recursion is
+
+
+$$
+V_N=R_N,
+$$
+
+
+$$
+V_l
+=
+\min\left\{
+R_l,\;
+\lambda c_{l+1}
++
+\mathbb E[V_{l+1}\mid\mathcal F_l]
+\right\}.
+$$
+
+
+Define the **advantage of continuing**
+
+
+$$
+A_l
+=
+R_l-
+\left(
+\lambda c_{l+1}
++
+\mathbb E[V_{l+1}\mid\mathcal F_l]
+\right).
+$$
+
+
+The optimal decision is:
+
+
+$$
+\text{continue iff }A_l>0.
+$$
+
+
+**This is the correct decision signal.** It requires no externally supplied depth labels. But estimating it reliably requires information about task outcomes and future computation.
+
+
+### Why prior objectives can fail mechanically
+
+
+**First, a mixture loss can reward states that are useful only in combination.**
+
+
+Training may make  and  jointly predictive without making either a good individual exit. A gate optimized through that mixture need not learn stopping value.
+
+
+**Second, survival weighting creates gradient starvation.**
+
+
+For the enumerated objective
+
+
+$$
+J=\mathbb E\left[
+\sum_l a_l\ell_l+
+\lambda\sum_l r_lc_l
+\right],
+$$
+
+
+holding the trajectory fixed, differentiation with respect to a nonterminal gate logit  gives
+
+
+$$
+\frac{\partial J}{\partial z_l}
+=
+\mathbb E\left[
+r_lq_l(1-q_l)
+\left(
+\ell_l-J^{\mathrm{cont}}_{l+1}
+\right)
+\right],
+$$
+
+
+where  is the conditional future loss plus future compute cost under the current downstream stopping policy.
+
+
+The desired comparison is present, but multiplied by:
+- : little survival means little training signal.
+- : a saturated gate is difficult to reverse.
+
+
+Deep stages can therefore remain bad because they are rarely trained, while the controller exits early because those stages are bad.
+
+
+**Third, compute penalties only make sense relative to execution.**
+
+
+A correctly survival-weighted penalty charges stages that would execute. An ungated penalty may charge nonexistent work or have no useful derivative with respect to stopping.
+
+
+### What the supplied numbers establish
+
+
+| Observation | Supported interpretation | Not established |
+|---|---|---|
+| Removing cost: accuracy remains 1.000, correlation falls from 0.771 to 0.103 | Task accuracy alone does not identify the desired allocation | Positive difficulty correlation is necessary for useful adaptation |
+| Removing gated cost: accuracy falls to 0.695 | This objective change strongly damages the reported system | Gating is universally necessary in that exact form |
+| Removing stage supervision: correlation becomes 0.124, accuracy 0.992 | Intermediate predictive competence matters in this setting | External depth labels are necessary |
+| Correlations change sign across  | The reported allocation is not robust across these configurations | Increasing  should theoretically increase correlation monotonically |
+
+
+Intermediate losses $\ell(p_l,y)$ use **task labels**, not depth labels. They are compatible with the stated prohibition on depth supervision.
+
+
+Also, allocating more compute to “harder” samples is not always optimal: some hard samples are irreducibly ambiguous, while moderately hard samples are highly improvable.
+
+
+### Solvability conditions
+
+
+A practical solution needs:
+1. **Predictable continuation advantage:** available features must contain information about .
+2. **Competent candidate exits:** deeper and shallower predictions must receive enough training.
+3. **A specified utility:** a compute budget or acceptable excess risk must be given.
+4. **Compatible execution semantics:** the training objective must evaluate the policy actually deployed.
+
+
+To replace an arbitrary penalty coefficient with an interpretable specification, use
+
+
+$$
+\min_\theta \mathbb E[\ell(p_H,Y)]
+\quad
+\text{subject to}
+\quad
+\mathbb E[C_H]\le B.
+$$
+
+
+A dual variable can adapt to meet . This removes manual selection of the *tradeoff multiplier*, not all optimizer settings or the need to choose .
+
+
+For scaling, use actual cost
+
+
+$$
+C_l=\sum_{j=1}^{l}c_j,
+$$
+
+
+not depth index alone. If the budget is a fraction of full computation, normalize by . If it is an absolute latency budget, do not.
+
+
+### Minimal falsifiable test
+
+
+Across :
+- Fix the task distribution, utility specification, and controller-selection rule.
+- Train without depth labels or depth-specific retuning.
+- On held-out data, execute full trajectories to estimate whether continuation was beneficial.
+- Measure decision regret, task risk, and actual compute.
+
+
+The hypothesis is falsified if the predicted sign of  fails to outperform a constant stopping decision, or if matched-budget performance does not transfer across .
+
+
+**Primary metric:** regret against a matched-information stopping oracle—not Pearson correlation with difficulty.
+
+
+---
+
+
+## 2. Target-free completion: possible as a conditional guarantee, not a universal invariant
+
+
+### Formal statement
+
+
+A useful completion variable should answer something like
+
+
+$$
+P\left(
+\text{additional computation improves loss by more than }\epsilon
+\mid\mathcal F_l
+\right)
+\le\delta.
+$$
+
+
+This is stronger and more decision-relevant than asking whether the state has stabilized.
+
+
+An alternative uses expected improvement under an admissible continuation policy :
+
+
+$$
+G_l^\pi
+=
+\mathbb E[
+\ell(p_l,Y)-\ell(p_{T^\pi},Y)
+\mid\mathcal F_l
+].
+$$
+
+
+Completion is then relative to a policy class, risk tolerance, and cost—not an intrinsic property of .
+
+
+### Why the proposed target-aware formula is not sufficient
+
+
+The issue is **unavailability of **, not . Labels need not be differentiated for  to be evaluated during training.
+
+
+Additional issues are:
+- $\ell_N$ need not be the minimum loss along the trajectory.
+-  can be negative if an intermediate loss exceeds the initial loss.
+- When $\ell_1\approx\ell_N$, normalization becomes dominated by .
+- A sample can improve later even after several stages of apparent stagnation.
+
+
+It measures progress relative to an endpoint. It does not prove that stopping now is optimal.
+
+
+### What the empirical numbers mean
+
+
+The reported mean compute is
+
+
+$$
+\bar C
+=
+\frac{2.53+2.60+2.90+2.50+2.53}{5}
+=
+2.612,
+$$
+
+
+or
+
+
+$$
+2.612/6=43.53\%
+$$
+
+
+of the full stage count. The reported range is approximately **41.7–48.3%**.
+
+
+Accuracy of – versus – suggests that the endpoint is not uniformly the best predictor. Possible explanations include:
+- Harmful later computation.
+- Intermediate supervision acting as regularization.
+- Differences in training objectives.
+- Selection advantages from target-aware evaluation, if labels enter the stopping decision.
+
+
+The last possibility must be explicitly excluded before calling these deployable adaptive-inference gains.
+
+
+### Solvability conditions
+
+
+There are three distinct routes.
+
+
+**A. Learn conditional expected gain using training labels.**
+
+
+$$
+\widehat G_l=f_\phi(\mathcal F_l).
+$$
+
+
+Training targets can be realized loss differences between stopping and specified continuations. At inference, the estimator uses no label.
+
+
+This is possible without depth labels. It gives statistical predictions, not universal correctness.
+
+
+**B. Use a certified numerical residual.**
+
+
+Suppose the same map  is repeatedly applied and is contractive:
+
+
+$$
+\|F(u)-F(v)\|\le\kappa\|u-v\|,
+\qquad \kappa<1.
+$$
+
+
+For its fixed point ,
+
+
+$$
+\|h_l-h^\star\|
+\le
+\frac{\|F(h_l)-h_l\|}{1-\kappa}.
+$$
+
+
+If $g=\operatorname{readout}$ is -Lipschitz, then
+
+
+$$
+\|g(h_l)-g(h^\star)\|
+\le
+\frac{L_g}{1-\kappa}\|F(h_l)-h_l\|.
+$$
+
+
+This certifies closeness to the converged prediction. It certifies task-loss closeness only with an additional loss regularity bound.
+
+
+It also requires a valid contraction constant and possibly another evaluation of .
+
+
+**C. Use task-specific verification.**
+
+
+Some tasks expose label-free checks: constraint satisfaction, feasibility residuals, consistency conditions, or independently checkable answers. Such checks can supply stronger evidence than generic confidence.
+
+
+### Strong limitation
+
+
+A tiny residual does not establish that the limiting prediction is correct.
+
+
+A system can converge perfectly to the wrong answer:
+
+
+$$
+F(h^\star)=h^\star
+\quad\not\Rightarrow\quad
+\ell(g(h^\star),y)\text{ is small}.
+$$
+
+
+Likewise, for arbitrary stage-dependent maps, identical prefix states can precede either negligible or substantial future improvement.
+
+
+### Minimal falsifiable test
+
+
+Predefine  and . Whenever the label-free estimator declares completion, continue offline and measure actual improvement.
+
+
+Test whether
+
+
+$$
+P(
+\ell(p_l,Y)-\ell(p_{T^\pi},Y)>\epsilon
+\mid \text{declared complete}
+)
+\le\delta
+$$
+
+
+holds on held-out data, including depth and distribution shifts.
+
+
+Failure of this conditional guarantee falsifies the completion claim. Correlation with difficulty does not test it.
+
+
+---
+
+
+## 3. Soft–hard mismatch: measure per-input execution and decision discrepancy
+
+
+### Formal statement
+
+
+Let
+
+
+$$
+H_\tau(x)=\min\{l:q_l(x)\ge\tau\},
+$$
+
+
+with forced exit at .
+
+
+The soft hazard distribution is
+
+
+$$
+P_s(T=l\mid x)=a_l(x),
+$$
+
+
+while deterministic inference induces
+
+
+$$
+P_h(T=l\mid x)=\mathbf 1[l=H_\tau(x)].
+$$
+
+
+These are different conditional distributions even when their aggregate statistics look similar.
+
+
+### Why aggregate KL is insufficient
+
+
+With terminal absorption,
+
+
+$$
+\sum_l a_l(x)=1.
+$$
+
+
+Therefore, a Bernoulli variable parameterized by  carries **no information about exit depth**.
+
+
+Comparing it with an exit-gate probability is not comparing the soft and hard stopping distributions.
+
+
+Even a correctly defined KL between dataset-level depth histograms would miss samplewise disagreement. For example:
+
+
+| Sample | Soft exit mass | Hard exit |
+|---|---|---|
+| A | All mass at stage 1 | Stage 10 |
+| B | All mass at stage 10 | Stage 1 |
+
+
+Both methods have the same marginal depth histogram and mean depth. Every sample disagrees.
+
+
+Thus, the reported KL of – does not establish semantic alignment.
+
+
+### Correct metric hierarchy
+
+
+**1. Per-input stopping-distribution mismatch**
+
+
+The total variation distance from the deterministic exit distribution is exactly
+
+
+$$
+D_{\mathrm{TV}}\!\left(a(x),\delta_{H_\tau(x)}\right)
+=
+1-a_{H_\tau(x)}(x).
+$$
+
+
+This asks whether the soft distribution actually concentrates on the deployed exit.
+
+
+**2. Per-input depth mismatch**
+
+
+$$
+W_1\!\left(a(x),\delta_{H_\tau(x)}\right)
+=
+\sum_l a_l(x)|l-H_\tau(x)|.
+$$
+
+
+Use cost differences instead of stage differences when stages have unequal cost.
+
+
+**3. Predictive discrepancy**
+
+
+$$
+D_{\mathrm{JS}}(p_s(x),p_h(x)),
+$$
+
+
+alongside classification disagreement or another task-appropriate output metric.
+
+
+**4. Task and compute discrepancy**
+
+
+$$
+\mathbb E[\ell(p_h,Y)-\ell(p_s,Y)],
+$$
+
+
+$$
+\mathbb E[C_{H_\tau}]
+-
+\mathbb E\left[\sum_l a_lC_l\right].
+$$
+
+
+Report tails and subgroups, not just averages.
+
+
+### What about trajectory distance?
+
+
+Under the setup as written, if the gate does not alter state updates, then before hard exit:
+
+
+$$
+h_l^{\mathrm{soft}}=h_l^{\mathrm{hard}}.
+$$
+
+
+There is no prefix-trajectory mismatch to discover. The mismatch is in **which output is returned**.
+
+
+After exit, the hard trajectory is undefined unless an explicit continuation or absorbing-state convention is introduced.
+
+
+Trajectory divergence becomes meaningful when gating changes writes, attention, communication, or subsequent state updates.
+
+
+### Gradient consistency
+
+
+For a deterministic threshold gate, the selected stage is locally constant away from threshold boundaries. Therefore, the exact gradient of the per-sample hard loss with respect to gate-only parameters is zero almost everywhere, and can be undefined at a switch.
+
+
+A soft surrogate can provide a useful gradient, but that does not make it the exact hard-execution gradient.
+
+
+### Solvability conditions
+
+
+Exact output equivalence requires special structure, such as
+
+
+$$
+\sum_l a_lh_l=h_{H_\tau},
+$$
+
+
+or at least equality after readout.
+
+
+This holds if:
+- The mass is genuinely concentrated at the hard exit.
+- All weighted states are equivalent for prediction.
+- A special cancellation or affine identity applies.
+
+
+Finite sigmoid logits do not generically produce one-hot exit distributions.
+
+
+### Minimal falsifiable test
+
+
+For every held-out input, record:
+-  and .
+- .
+- Cost-weighted .
+- Soft and hard predictions.
+- Paired task-loss difference.
+
+
+A claim of soft–hard equivalence fails if predictive or stopping discrepancies exceed a preregistered tolerance, regardless of aggregate KL.
+
+
+---
+
+
+## 4. Identity collapse: enforce useful computation, not mandatory movement
+
+
+### Formal statement
+
+
+The undesirable condition is not
+
+
+$$
+h_{l+1}\approx h_l
+$$
+
+
+by itself. It is that the system pays for stages that do not improve any relevant decision or enable later improvement.
+
+
+A natural quantity is the expected value of the stage under a specified continuation:
+
+
+$$
+U_l
+=
+\mathbb E[
+\ell(p_{\mathrm{out}}^{\mathrm{skip}\ l},Y)
+-
+\ell(p_{\mathrm{out}}^{\mathrm{execute}\ l},Y)
+].
+$$
+
+
+This is an intervention-based utility, not a norm of the residual.
+
+
+### Why the supplied evidence is suggestive but incomplete
+
+
+The reported cosine is
+
+
+$$
+\cos(h_1,h_{12})=0.9975.
+$$
+
+
+For unit-normalized states, this corresponds to
+
+
+$$
+\left\|
+\frac{h_1}{\|h_1\|}
+-
+\frac{h_{12}}{\|h_{12}\|}
+\right\|
+=
+\sqrt{2-2(0.9975)}
+\approx0.0707.
+$$
+
+
+That is small angular movement, but not zero movement. It also says nothing about norms.
+
+
+More importantly:
+- Small state changes can cross a decision boundary.
+- Large state changes can lie in a readout nullspace.
+- A strong initial representation may legitimately need almost no further computation.
+- Terminal changes of – versus mid-stage changes of – are not directly interpretable without normalization conventions and task effects.
+
+
+The $79\%/21\%/0\%$ exit distribution establishes **early-exit concentration**. It does not, alone, establish incorrect stopping.
+
+
+### Why movement penalties fail mechanically
+
+
+Consider an objective that enforces
+
+
+$$
+\|h_{l+1}-h_l\|\ge m.
+$$
+
+
+If the readout is insensitive to a subspace $\mathcal N$, then the model can choose
+
+
+$$
+h_{l+1}=h_l+v_l,
+\qquad v_l\in\mathcal N,
+$$
+
+
+and satisfy the movement requirement without changing task behavior.
+
+
+It can also oscillate between states, increasing path length without improving the answer.
+
+
+Your proposed residual scaling has an additional problem:
+
+
+$$
+h_{l+1}=h_l+\alpha_lf_l(h_l).
+$$
+
+
+If , finite  cannot create progress. If  is mostly noise, increasing  amplifies noise.
+
+
+### Solvability conditions
+
+
+Without changing stage architecture, reasonable objective-level interventions include:
+- **Training every candidate exit:** prevent useful intermediate predictors from being starved.
+- **Training counterfactual continuations:** evaluate later stages during training even when the current gate prefers to stop.
+- **Penalizing unjustified stopping:** use future loss reductions to train a continuation-value predictor.
+- **Testing stage deletion:** remove or bypass stages to determine whether apparent inactivity is truly redundant.
+
+
+These do not require depth labels.
+
+
+However, a universal guarantee that *every stage* makes meaningful task progress is impossible: some inputs are already solved, and some tasks require several individually uninformative steps before a useful result emerges.
+
+
+Even a monotonic-loss penalty,
+
+
+$$
+\max(0,\ell_{l+1}-\ell_l),
+$$
+
+
+can penalize necessary intermediate representations. It is a task-dependent inductive bias, not a general remedy.
+
+
+### Minimal falsifiable test
+
+
+For low-change stages, compare:
+1. Normal execution.
+2. Stage bypass.
+3. Forced continuation after the proposed early exit.
+
+
+Measure paired output and loss changes.
+
+
+The collapse diagnosis gains support if bypassing many stages has negligible effect **and** early stopping misses substantial later gains.
+
+
+If bypassing the stages degrades performance despite small cosine changes, the geometric diagnosis is falsified.
+
+
+---
+
+
+## 5. Asymmetric leverage: normalize evidence, but do not confuse scale with meaning
+
+
+### Formal statement
+
+
+You have
+
+
+$$
+z=z_a-z_b,
+\qquad
+z_a\in\mathbb R,
+\qquad
+z_b\in[-4,4].
+$$
+
+
+For arbitrarily large ,
+
+
+$$
+q=\sigma(z_a-z_b)\to1
+$$
+
+
+uniformly over allowed .
+
+
+Thus, the bounded branch cannot universally oppose the unbounded branch.
+
+
+That asymmetry is real.
+
+
+### Correcting the numerical diagnosis
+
+
+The reported numbers do **not** require .
+
+
+With
+
+
+$$
+z_a=3.05,\qquad z_b=1.47,
+$$
+
+
+we obtain
+
+
+$$
+q=\sigma(1.58)\approx0.829.
+$$
+
+
+That already explains the reported .
+
+
+Also,
+
+
+$$
+\sigma(3.05-4)\approx0.279
+$$
+
+
+is the minimum attainable probability at that specific  under the mathematical bound—not the expected probability under the actually learned resistance.
+
+
+The asymptotic risk is valid; the claim that the observed probability proves  exceeded four is not.
+
+
+### Why common fixes are incomplete
+
+
+| Method | What it fixes | What it does not fix |
+|---|---|---|
+| Bound both branches | Prevents unbounded amplitude imbalance | Does not calibrate competing evidence |
+| Normalize branch weights | Removes some parameter-norm leverage | Does not ensure useful features or comparable semantics |
+| Two-way softmax | Gives a normalized binary probability | Is not invariant to logit scaling |
+| Temperature | Controls sharpness | Introduces calibration and conditioning choices |
+| Residual rescaling | Changes update magnitude | Does not establish task utility |
+
+
+Moreover, because  can be negative, the purported “resistance” branch can increase the stop logit. Its semantic role is not enforced by its name.
+
+
+### A genuine scale-invariant construction
+
+
+For two linear evidence branches, cosine scores give
+
+
+$$
+s_a=
+\frac{w_a^\top u_a}{\|w_a\|\|u_a\|},
+\qquad
+s_b=
+\frac{w_b^\top u_b}{\|w_b\|\|u_b\|},
+$$
+
+
+$$
+z=\kappa(s_a-s_b).
+$$
+
+
+Then
+
+
+$$
+s_a,s_b\in[-1,1],
+\qquad
+z\in[-2\kappa,2\kappa].
+$$
+
+
+Each score is invariant to positive rescaling of its weight or feature vector.
+
+
+But:
+- Zero norms require handling.
+- An  stabilizer weakens exact invariance near zero.
+-  still controls probability sharpness.
+- Angular alignment can still make one branch dominate semantically.
+
+
+There is a useful mathematical limit here:
+
+
+> A nonconstant function cannot be both continuous at the origin and exactly invariant to all positive input scalings.
+
+
+Indeed, if  for every , continuity as  implies
+
+
+$$
+f(x)=f(0)
+$$
+
+
+for every .
+
+
+Exact scale invariance necessarily excludes the origin, introduces a singularity, or relaxes continuity.
+
+
+### Solvability conditions
+
+
+The deeper solution is to make both terms commensurate:
+
+
+$$
+\underbrace{\text{expected loss reduction}}_{\text{benefit}}
+-
+\underbrace{\lambda\times\text{additional compute}}_{\text{cost in loss units}}.
+$$
+
+
+If both branches represent calibrated risks or utilities in the same units, their competition has a defined meaning.
+
+
+Bounding unrelated latent quantities merely makes their competition numerically tidy.
+
+
+### Minimal falsifiable test
+
+
+Perform a **function-preserving reparameterization test**:
+- Multiply a branch weight by factors spanning several orders of magnitude.
+- Apply any compensating transformation needed to preserve the represented evidence.
+- Check whether decisions change.
+
+
+A claimed scale-invariant controller should preserve its decisions under the relevant transformations.
+
+
+Separately, test whether each branch predicts its stated target. Invariance without calibration does not solve stopping.
+
+
+---
+
+
+## 6. Causal evidence: label-free behavioral effects are measurable; task value is not universal
+
+
+### Formal statement
+
+
+Distinguish:
+
+
+$$
+\Delta_{\mathrm{pred}}
+=
+D\left(
+p_{\mathrm{out}}^{do(h_l=v)},
+p_{\mathrm{out}}
+\right)
+$$
+
+
+from
+
+
+$$
+\Delta_{\mathrm{task}}
+=
+\ell(p_{\mathrm{out}}^{do(h_l=v)},y)
+-
+\ell(p_{\mathrm{out}},y).
+$$
+
+
+The first measures a change in model behavior. The second measures whether the change helps or hurts the task.
+
+
+**An intervention can change the prediction substantially and improve, worsen, or preserve task performance.**
+
+
+### Why controller confidence and geometry do not establish causality
+
+
+A gate value of  establishes only what the gate predicts.
+
+
+A cosine of  establishes only a geometric relationship.
+
+
+Neither tells us:
+- Whether early computation was necessary.
+- Whether later computation changes the answer.
+- Whether the change improves expected loss.
+
+
+Likewise, weak correlation between an emission gate and a downstream intervention effect means the gate is not a reliable proxy for that chosen effect. It does not identify the reason: the effect metric, intervention, gate objective, or downstream compensation may each matter.
+
+
+### Assessment of the proposed estimators
+
+
+| Candidate | Label-free? | What it measures | Main limitation |
+|---|---|---|---|
+| Deterministic perturbation response | Yes | Finite behavioral sensitivity | Requires extra executions; interventions may be off-distribution |
+| Downstream Jacobian magnitude | Yes | Local sensitivity of outputs to state | Not the sign of task benefit; typically requires downstream computation |
+| Loss gradient | Usually needs a loss target | Local effect on that loss | Predicted labels or entropy change the target being measured |
+| Conditional mutual information | Sometimes estimable under added assumptions | Statistical dependence | Not generally a causal or task-utility measure |
+| Calibrated gain predictor | Labels during training only | Conditional expected task benefit | Depends on calibration and distribution stability |
+
+
+The proposed mutual information has a particularly important degeneracy. If the transition is deterministic,
+
+
+$$
+h_l=F_l(h_{l-1}),
+$$
+
+
+then conditioned on ,  contributes no additional randomness:
+
+
+$$
+I(h_l;h_{\mathrm{out}}\mid h_{l-1})=0
+$$
+
+
+under the standard conditional-information interpretation.
+
+
+Yet intervening on  can have a large downstream effect. Deterministic mediation is a simple example of why conditional dependence and intervention effects are different.
+
+
+### Solvability conditions
+
+
+At inference, without labels, one can measure:
+- Prediction changes under specified interventions.
+- Constraint violations.
+- Sensitivity to deterministic perturbations.
+- A learned estimate of expected task effect.
+
+
+One cannot universally measure the realized task-loss effect without knowing enough about the target or a valid substitute for it.
+
+
+There is also a compute accounting issue: executing several counterfactual continuations may cost more than simply continuing once.
+
+
+### Minimal falsifiable test
+
+
+Use a fixed, declared intervention such as bypassing one residual update. On a held-out labeled set:
+- Compute the label-free proxy.
+- Measure the actual intervention-induced loss change.
+- Test sign prediction, calibration, and whether the resulting decisions improve risk at matched total compute.
+
+
+A proxy is rejected as a stopping signal if it predicts behavioral sensitivity but not beneficial continuation.
+
+
+Labels belong in this validation experiment; they need not be available to the deployed controller.
+
+
+---
+
+
+## 7. The “three-body problem”: coupling is demonstrated; chaos is not
+
+
+### Formal statement
+
+
+Let  denote model parameters and  controller parameters. With fixed training protocol, represent training as
+
+
+$$
+(\theta_{t+1},\phi_{t+1})
+=
+F(\theta_t,\phi_t).
+$$
+
+
+Deterministic chaos concerns sensitive dependence under the **same map** , for example a positive largest Lyapunov exponent along a bounded trajectory.
+
+
+Changing noise level, loss weight, depth, or task changes  itself.
+
+
+Therefore, differing outcomes across hyperparameter sweeps do not establish chaos.
+
+
+### What the reported numbers show
+
+
+| Reported change | Observation | Defensible conclusion |
+|---|---|---|
+|  |  | Non-monotonic response in that metric |
+| ,  | Correlation  | Poor transfer of this setting |
+| Scaling  with  at  | Correlation becomes  | This rescaling improves the reported correlation |
+
+
+Without a definition of , its changes have no further theoretical interpretation.
+
+
+These observations are consistent with:
+- Nonconvexity and different basins.
+- Saturated gate gradients.
+- Changing gradient magnitudes across depth.
+- Threshold discontinuities in evaluation.
+- A compute objective whose units change with .
+- Co-adaptation between stage competence and stopping.
+
+
+None requires chaos.
+
+
+### The principal feedback loop
+
+
+A plausible loop is:
+
+
+$$
+\text{early stopping}
+\Rightarrow
+\text{weak deep-stage gradients}
+\Rightarrow
+\text{poor continuation value}
+\Rightarrow
+\text{more early stopping}.
+$$
+
+
+Another is:
+
+
+$$
+\text{strong endpoint-only supervision}
+\Rightarrow
+\text{late useful transformations}
+\Rightarrow
+\text{poor early exits}
+\Rightarrow
+\text{dependence on deep execution}.
+$$
+
+
+The objective, model, and controller jointly shape the very quantity the controller is trying to predict.
+
+
+### Solvability conditions
+
+
+An invariant exists at the level of the **decision problem**:
+
+
+$$
+\text{continue when conditional benefit exceeds conditional cost}.
+$$
+
+
+There need not be an invariant parameter value, gate temperature, or depth–difficulty correlation.
+
+
+Stability can improve through:
+- Common units for task benefit and compute.
+- Fixed budget or excess-risk specifications.
+- Sufficient training of all candidate exits.
+- Continuation targets defined against a specified policy.
+- Calibration checks separated from representation-quality checks.
+
+
+A meta-optimizer can help within a task family. It cannot provide distribution-free guarantees or remove the need to specify utility.
+
+
+Ensembling can reduce estimator variance, but:
+- Its overhead must be charged.
+- Shared systematic errors remain.
+- It does not repair soft–hard semantics.
+
+
+### Minimal falsifiable test
+
+
+To test chaos rather than generic sensitivity:
+1. Fix task data, data order, optimizer, all hyperparameters, and numerical settings.
+2. Perturb only the initial parameters by a small controlled amount.
+3. Track divergence under the same update map.
+4. Test whether a positive finite-time divergence rate persists across perturbation sizes and horizons.
+
+
+An initial transient of exponential separation alone is not sufficient evidence of a chaotic attractor.
+
+
+To test the more actionable hypothesis, freeze the backbone and train the controller against fixed continuation outcomes. If instability largely disappears, co-adaptation—not an intrinsic inability to learn stopping—is implicated.
+
+
+---
+
+
+## Cross-cutting synthesis
+
+
+### 1. Common root: not seven independent failures
+
+
+The problems fall into three interacting groups.
+
+
+| Root issue | Problems most directly affected | Missing object |
+|---|---|---|
+| Decision semantics | 1, 3, 7 | The deployed stopping policy and its actual objective |
+| Observability of useful progress | 2, 4, 6 | Conditional task benefit of future computation |
+| Optimization and calibration | 1, 4, 5, 7 | Comparable evidence and non-starved learning signals |
+
+
+The deepest common error is:
+
+
+$$
+\boxed{
+\text{A proxy for computation is treated as a certificate of useful computation.}
+}
+$$
+
+
+Confidence is not correctness. Movement is not progress. Sensitivity is not utility. Difficulty is not improvability. A normalized gate is not a calibrated decision.
+
+
+These distinctions explain much of the evidence without invoking a mysterious universal failure mode.
+
+
+### 2. Unifying principle: separate prediction, continuation value, and execution
+
+
+The most promising principle is **decision-aligned adaptive computation**:
+
+
+1. **Prediction:** each candidate exit produces a task prediction.
+2. **Valuation:** estimate the conditional improvement available through continuation.
+3. **Execution:** compare that improvement with an explicit cost or risk tolerance.
+4. **Verification:** evaluate the same execution policy that will be deployed.
+
+
+This is not necessarily a new stage architecture. Much of it is an objective and measurement discipline.
+
+
+It addresses several problems simultaneously:
+- Halting learns a decision-relevant quantity.
+- Target-free inference uses a learned conditional expectation.
+- Stage utility is evaluated in task units rather than geometric units.
+- Competing signals have commensurate meanings.
+- Scaling is expressed through actual compute cost.
+
+
+**But it does not erase the differentiable-training versus hard-threshold conflict.** One must explicitly choose among:
+- Preserving soft execution at inference.
+- Accepting a surrogate for hard execution and bounding its deployment gap.
+- Using a different deterministic, piecewise-differentiable execution construction.
+- Restricting the model class so soft and hard outputs become equivalent.
+
+
+There is no generic normalization trick that avoids this choice.
+
+
+### 3. Strongest negative results
+
+
+#### A. Generic soft mixtures cannot equal hard first-crossing execution
+
+
+Fix two distinct states  and force exit at stage two.
+
+
+The soft output is
+
+
+$$
+S(q)=qh_1+(1-q)h_2,
+$$
+
+
+while the hard output is
+
+
+$$
+H(q)=
+\begin{cases}
+h_2,&q<\tau,\\
+h_1,&q\ge\tau.
+\end{cases}
+$$
+
+
+ is continuous and generally lies between the states.  switches discontinuously.
+
+
+They cannot agree for all .
+
+
+This already disproves generic exact train–inference output equivalence for the stated setup.
+
+
+#### B. Exact hard gate gradients provide no ordinary per-sample learning signal away from boundaries
+
+
+With a fixed backbone, changing a gate-only parameter slightly does not change the selected exit unless a threshold is crossed.
+
+
+Thus the exact per-sample hard loss is piecewise constant in that parameter.
+
+
+An expected loss over a continuous input distribution can sometimes have a nonzero derivative through moving decision boundaries. But ordinary backpropagation through individual hard decisions does not automatically compute that boundary contribution.
+
+
+Therefore:
+
+
+$$
+\boxed{
+\text{Exact hard thresholding + ordinary pathwise gradients}
+\not\Rightarrow
+\text{a useful exact gate gradient}.
+}
+$$
+
+
+This is narrower and more accurate than saying all hard adaptive computation is nondifferentiable everywhere.
+
+
+#### C. No universal label-free task-progress invariant exists
+
+
+Consider two tasks with identical available states and predictions, but different conditional label distributions.
+
+
+Let the current and future predictions favor different labels. Continuing helps under one task distribution and hurts under the other.
+
+
+Any target-free rule receiving the same information makes the same decision in both worlds. It must be wrong in at least one.
+
+
+Learning a known task distribution can resolve this ambiguity statistically. A universal state-only invariant cannot.
+
+
+#### D. No universal hyperparameter-free accuracy–compute optimum exists
+
+
+Suppose continuation reduces expected loss by  and costs .
+
+
+It is optimal under the penalized objective exactly when
+
+
+$$
+g>\lambda c.
+$$
+
+
+Different users or applications can legitimately choose different . A budget or risk tolerance expresses the same preference in another form.
+
+
+No algorithm can infer a unique correct preference from the state trajectory alone.
+
+
+### 4. What single experiment could falsify the entire paradigm?
+
+
+**None.** Adaptive computation is a broad class of strategies, not one empirical hypothesis.
+
+
+There are simple task distributions where some inputs require one operation and others require many; an observable input property identifies which. Adaptation can then strictly improve expected compute at fixed accuracy.
+
+
+What can be falsified is a claim such as:
+
+
+> “This model family benefits from input-dependent stopping on this task distribution at this compute scale.”
+
+
+The strongest compact test is a **matched-budget oracle-gap experiment**.
+
+
+For full held-out trajectories, estimate:
+- : the best input-independent depth policy, including mixtures of fixed depths, at budget .
+- : the best stopping policy restricted to information actually available at inference.
+- : the learned controller.
+
+
+Then decompose
+
+
+$$
+R_{\mathrm{learned}}(B)-R_{\mathrm{fixed}}(B)
+=
+\underbrace{
+R_{\mathrm{info}}^\star(B)-R_{\mathrm{fixed}}(B)
+}_{\text{available adaptation benefit}}
++
+\underbrace{
+R_{\mathrm{learned}}(B)-R_{\mathrm{info}}^\star(B)
+}_{\text{controller regret}}.
+$$
+
+
+Interpretation:
+- No oracle advantage: little stopping opportunity exists in those trajectories under the allowed information.
+- Oracle advantage, learned controller failure: estimation or optimization is the bottleneck.
+- Advantage disappears after controller overhead: the computational benefit is not operationally useful.
+- Advantage exists only for a label-aware hindsight oracle: useful exit variation exists, but may not be observable at deployment.
+
+
+For a globally trained model-family claim, matched-budget fixed-depth models must also be trained separately. A frozen-backbone oracle test diagnoses one representation, not every possible representation.
+
+
+### 5. Five-year bet
+
+
+I would fund **calibrated continuation-value prediction, paired with task-specific certificates where available**.
+
+
+The program would have three priorities:
+
+
+| Priority | Why fund it | Main risk |
+|---|---|---|
+| Predict future task-loss improvement from current information | Directly targets the stopping decision | Miscalibration under distribution shift |
+| Develop verifiable residuals or task certificates | Can provide stronger stopping guarantees | Limited task coverage |
+| Evaluate adaptation using oracle gaps and full compute accounting | Separates representation, observability, and controller failures | Expensive evaluation |
+
+
+I would not make the primary bet on:
+- Larger collections of mutually competing gates.
+- A universal state-motion measure of completion.
+- Temperature schedules chosen from increasingly large sweeps.
+- Maximizing difficulty–depth correlation.
+- Claiming alignment from aggregate KL.
+
+
+### Final assessment
+
+
+The reported results are consistent with **misaligned objectives, weakly identifiable stopping signals, and self-reinforcing optimization failures**. They do not establish chaos, and they do not falsify adaptive computation.
+
+
+The central scientific target should be:
+
+
+$$
+\boxed{
+\text{Predictable, calibrated marginal task benefit per unit of additional compute.}
+}
+$$
+
+
+That quantity is learnable under assumptions, certifiable in restricted settings, and impossible to recover universally from label-free geometry alone.
+
+
+**Suggested next step:** run the matched-budget oracle-gap experiment before another hyperparameter sweep; it determines whether the missing ingredient is useful deeper computation, observable stopping information, or a controller capable of exploiting it.
